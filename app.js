@@ -223,19 +223,18 @@ function initMap() {
   map = L.map('map', { zoomControl: true, maxZoom: 17 }).setView([43.26, -79.87], 13);
   map.attributionControl.setPrefix('');
 
-  // A near-greyscale basemap, so the only colour on screen is the data. The
-  // dark variant is picked up when the page is in dark mode.
-  // CEILING: CARTO's free tiles suit this traffic. Switch to MapTiler or
-  // Protomaps (about $20/mo) if daily tile loads reach the thousands.
-  const darkMode = matchMedia('(prefers-color-scheme: dark)').matches;
-  L.tileLayer(
-    `https://{s}.basemaps.cartocdn.com/${darkMode ? 'dark' : 'light'}_all/{z}/{x}/{y}{r}.png`,
-    {
-      subdomains: 'abcd',
-      maxZoom: 17,
-      attribution: '&copy; OpenStreetMap, &copy; CARTO',
-    }
-  ).addTo(map);
+  // Standard OpenStreetMap tiles, desaturated by a CSS filter on the tile pane
+  // rather than by a different provider, so the only colour on screen is the
+  // data and no API key is ever needed. CARTO's basemaps look right but now
+  // return an "API KEY REQUIRED" tile, with a 200 status, so a status check
+  // does not catch it.
+  // CEILING: OSM's public tiles suit this traffic. Their usage policy rules out
+  // a heavy app, so move to MapTiler or Protomaps (about $20/mo, with a key) if
+  // daily tile loads reach the thousands.
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 17,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+  }).addTo(map);
 
   cellLayer = L.layerGroup().addTo(map);
 

@@ -114,7 +114,18 @@
     height: 18rem; border: 1px solid var(--border); border-radius: .5rem;
     margin-bottom: .5rem; background: var(--quiet-fill);
   }
-  /* Keep the map quiet: no Leaflet flag, small faint attribution, plain zoom. */
+  /* Keep the map quiet: no Leaflet flag, small faint attribution, plain zoom.
+     The filter applies to the tile pane only, so the basemap goes grey while
+     the reported cells drawn over it keep their colour. */
+  .leaflet-tile-pane { filter: grayscale(1) contrast(.9) brightness(1.05); }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .leaflet-tile-pane {
+      filter: grayscale(1) invert(1) brightness(.85) contrast(.9) hue-rotate(180deg);
+    }
+  }
+  :root[data-theme="dark"] .leaflet-tile-pane {
+    filter: grayscale(1) invert(1) brightness(.85) contrast(.9) hue-rotate(180deg);
+  }
   .leaflet-container { background: var(--quiet-fill); font: inherit; }
   .leaflet-control-attribution {
     background: transparent !important; color: var(--muted);
