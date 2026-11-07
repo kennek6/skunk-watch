@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Skunk Watch privacy</title>
+<meta name="description" content="What Skunk Watch collects, how long it keeps it, and why there is nothing to request the deletion of.">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<meta name="theme-color" content="#1b1b1f">
+<style>
+  :root {
+    --bg: #faf9f7; --surface: #ffffff; --border: #e3e0da;
+    --text: #1b1b1f; --muted: #6b6762;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #16161a; --surface: #1f1f24; --border: #32323a;
+      --text: #ececef; --muted: #9b968f;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #16161a; --surface: #1f1f24; --border: #32323a;
+    --text: #ececef; --muted: #9b968f;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-text-size-adjust: 100%;
+  }
+  main { max-width: 34rem; margin: 0 auto; padding: 1.5rem 1rem 4rem; }
+  h1 { font-size: 1.25rem; margin: 0 0 1.25rem; }
+  h2 { font-size: 1rem; margin: 1.75rem 0 .5rem; }
+  p, li { margin: 0 0 .75rem; }
+  ul { padding-left: 1.2rem; }
+  a { color: inherit; }
+  table { border-collapse: collapse; width: 100%; font-size: .9375rem; margin: 0 0 1rem; }
+  th, td { text-align: left; padding: .5rem .6rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: .8125rem; text-transform: uppercase; letter-spacing: .05em; }
+  code { font-size: .875em; background: var(--surface); border: 1px solid var(--border); border-radius: .25rem; padding: 0 .25rem; }
+  .muted { color: var(--muted); font-size: .875rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>What Skunk Watch collects</h1>
+
+  <p>
+    No accounts, no names, no email addresses, no advertising, and no analytics.
+    The page is static and most of it runs entirely in your browser.
+  </p>
+
+  <h2>When you check conditions</h2>
+  <p>
+    Your coordinates are rounded to two decimal places, about 1 km, and sent to
+    <a href="https://open-meteo.com/">Open-Meteo</a> to fetch the temperature and
+    recent rainfall. Nothing about that request is stored by Skunk Watch. If you
+    type a town name instead, the name goes to Open-Meteo's place lookup and your
+    own position is never involved.
+  </p>
+  <p>
+    The activity estimate itself is calculated on your device. It is never sent
+    anywhere.
+  </p>
+
+  <h2>When you send a report</h2>
+  <p>
+    The point you tapped is converted to a grid cell before anything is written
+    down, and the original coordinate is discarded. There is no latitude or
+    longitude column in the database. A sighting becomes a cell about 150 m
+    across; a smell report, which could have come from much further away,
+    becomes a cell about 1 km across. The map only ever draws cells roughly
+    900 m across, and draws the square rather than a dot, because a dot would
+    put back the precision that was deliberately removed.
+  </p>
+
+  <table>
+    <tr><th>Stored</th><th>Why</th></tr>
+    <tr><td>Grid cell</td><td>So the report can appear on the map near where it happened</td></tr>
+    <tr><td>The hour it happened</td><td>Rounded to the hour, never finer, because a small area plus an exact minute can identify a household</td></tr>
+    <tr><td>What you reported</td><td>Seen, smelled, or found dead on the road</td></tr>
+    <tr><td>A random number for your install</td><td>So one device cannot flood the map. It is not linked to you, your name, or anything else you do</td></tr>
+  </table>
+
+  <h2>How long it is kept</h2>
+  <table>
+    <tr><th>Layer</th><th>Kept</th></tr>
+    <tr><td>Your individual report</td><td>Deleted within 48 hours</td></tr>
+    <tr><td>Daily count for an area</td><td>30 days</td></tr>
+    <tr><td>Weekly count for an area</td><td>Indefinitely</td></tr>
+  </table>
+  <p>
+    The counts that outlive your report look like <code>this area, week of 2
+    November, 4 reports</code>. They carry no timestamp, no device number, and no
+    link to any individual report, so they are not about an identifiable person.
+  </p>
+
+  <h2>Why there is no "delete my data" form</h2>
+  <p>
+    There is nothing left to delete. Individual reports are gone within 48 hours
+    whether or not anyone asks, and what remains afterwards is an anonymous count
+    for an area that cannot be traced back to a device or a person. A request
+    form would arrive after the data it referred to had already been removed.
+  </p>
+
+  <h2>What is never collected</h2>
+  <ul>
+    <li>Your exact location, at any point, for any purpose</li>
+    <li>Your home address, or any saved "my home" position. If you use the
+      location button, the coordinates stay in your browser</li>
+    <li>Photographs. Image files carry exact GPS coordinates and a device
+      identifier, and a photograph of a skunk also shows whose fence it is</li>
+    <li>Free text. There is no comment box anywhere in the app, because no amount
+      of coarsening stops someone typing an address into one</li>
+    <li>Names, email addresses, phone numbers, or any contact details</li>
+  </ul>
+
+  <h2>Other services involved</h2>
+  <ul>
+    <li><a href="https://open-meteo.com/">Open-Meteo</a> receives a coordinate
+      rounded to about 1 km, or a place name, for weather and place lookup</li>
+    <li><a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>
+      serves the map tiles, which means it sees which map squares your browser
+      requests</li>
+    <li>Cloudflare hosts the reporting API; GitHub Pages serves this page. Both
+      see ordinary web server request logs</li>
+  </ul>
+
+  <h2>A caution about the estimate</h2>
+  <p>
+    The activity estimate is built from published skunk behaviour but the
+    weighting has not been validated against field data. The app warns when
+    conditions favour activity and otherwise shows nothing. It never tells you
+    that no skunk is nearby, because it cannot know that.
+  </p>
+
+  <p class="muted">
+    Last updated 7 November 2026. <a href="index.html">Back to Skunk Watch</a>.
+  </p>
+</main>
+</body>
+</html>

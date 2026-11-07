@@ -52,11 +52,16 @@ other users present.
     destroyed.
 12. **No photo uploads.** EXIF carries exact GPS and a device ID, and the image
     itself shows whose fence it is.
-13. **Do not request geolocation on first load.** Show a result for a typed
-    postal code or a tapped map point first. GPS is requested only when the user
-    presses a "use my location" button. A permission prompt before anything
-    works loses a large share of users.
-14. **Build only the stage you were asked for.** Do not add accounts, a login
+13. **Do not request geolocation on first load, and never require it to
+    report.** Conditions are checked by typed place name; reports are made by
+    tapping the map. GPS is a shortcut behind a button in both places, never the
+    main path. Two reasons: a permission wall before anything works loses a
+    large share of users, and a tapped pin means the app never learns where the
+    reporter is, only where the animal was, which is strictly more private than
+    GPS reporting. It also lets someone report a skunk seen from a car.
+14. **Leaflet is the one approved dependency** (CDN, no integrity hash, because
+    a stale hash takes the page down). Everything else stays dependency-free.
+15. **Build only the stage you were asked for.** Do not add accounts, a login
     screen, a database, or analytics unprompted.
 
 ## Stage 1 scope
@@ -171,15 +176,30 @@ No real names, no profiles, no post history.
 | Recent activity | 14-30 days | cell + day |
 | Established presence | indefinite | cell + week, count only |
 
-Aggregate before deleting: increment a per-cell per-week counter, then drop the
-individual row. The count carries no timestamp and no device key, so the
-ecological signal survives while the privacy footprint shrinks.
+Aggregate on the way IN, not during the sweep. Inserting a report increments
+the daily and weekly counters in the same transaction, and the hourly sweep then
+only deletes. REVISED 2026-11-07: a sweep that aggregates before deleting loses
+history permanently if the cron fails, while incrementing at insert time leaves
+the counts correct even if the sweep never runs again.
+
+The counts carry no timestamp and no device key, so the ecological signal
+survives while the privacy footprint shrinks.
 
 ### Display suppression
 
-A cell with fewer than three reports from distinct devices does not appear on
-the map. It still counts toward the model. Rural cells contain one or two houses
-and no cell size fixes that.
+REVISED 2026-11-07, replacing the three-distinct-devices rule. That rule meant
+a street with two participating neighbours would never show anything, which
+defeats the point of the app on day one.
+
+Instead the problem is solved geometrically: reports are stored at precision 7
+for sightings and roadkill and 6 for smell, but the map only ever draws
+precision 6 cells, about 900 x 610 m at Hamilton's latitude. A cell that size
+contains hundreds of households even in semi-rural areas, so a single report
+identifies nobody and can be shown immediately.
+
+Storing at precision 7 keeps the option of finer display later, per cell, once
+there is enough density to know it is safe. Do not enable that without a
+population-density check.
 
 ### Querying
 

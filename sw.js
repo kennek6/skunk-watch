@@ -4,8 +4,11 @@
 //
 // CEILING: cache name is bumped by hand. If this grows past a handful of files,
 // move to a generated precache manifest.
-const CACHE = 'skunkwatch-shell-v1';
-const SHELL = ['./', 'index.html', 'risk.js', 'manifest.webmanifest', 'icon.svg'];
+const CACHE = 'skunkwatch-shell-v2';
+const SHELL = [
+  './', 'index.html', 'privacy.html', 'app.js', 'risk.js', 'geo.js',
+  'config.js', 'manifest.webmanifest', 'icon.svg',
+];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));

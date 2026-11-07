@@ -11,6 +11,7 @@
 //   2026-07-04  21:02 EDT      2026-10-15  18:35 EDT
 
 import { assess, timeline, peakWindow } from './risk.js';
+import { encodeGeohash, geohashBounds, cellSizeMetres, regionsForBounds, PRECISION } from './geo.js';
 
 const HAMILTON = { lat: 43.26, lon: -79.87 };
 const FAIRBANKS = { lat: 64.84, lon: -147.72 };
@@ -224,6 +225,65 @@ console.log('\nTimeline\n');
     hours: 4, stepMinutes: 60, temperatureAt: (iso) => (iso.includes('T13:') ? NaN : 12),
   });
   check('segments without a forecast temperature are dropped', 3, gappy.length, gappy.length === 3);
+}
+
+
+// ---------------------------------------------------------------------------
+// Grid snapping. These guard the privacy design, so they matter more than the
+// model tests: a bug here leaks a street address.
+// ---------------------------------------------------------------------------
+
+console.log('\nGrid snapping\n');
+{
+  const check = (label, expected, got, ok) => {
+    if (!ok) failures++;
+    console.log(row(label, String(expected), String(got), ok ? 'PASS' : 'FAIL'));
+  };
+
+  // The canonical worked example from the geohash literature: 57.64911 N,
+  // 10.40744 E encodes to u4pruydqqvj. If our bit order were wrong this fails.
+  const ref = encodeGeohash(57.64911, 10.40744, 11);
+  check('reference point encodes to u4pruydqqvj', 'u4pruydqqvj', ref, ref === 'u4pruydqqvj');
+
+  const h = encodeGeohash(43.26, -79.87, PRECISION.point);
+  const b = geohashBounds(h);
+  const contains = 43.26 >= b.minLat && 43.26 <= b.maxLat && -79.87 >= b.minLon && -79.87 <= b.maxLon;
+  check('a point falls inside its own cell', true, contains, contains);
+
+  // Snapping must be deterministic. This is the whole reason it is not jitter.
+  const repeats = new Set([0, 1, 2].map(() => encodeGeohash(43.26, -79.87, PRECISION.point)));
+  check('the same point always yields one cell', 1, repeats.size, repeats.size === 1);
+
+  const p7 = cellSizeMetres(encodeGeohash(43.26, -79.87, 7));
+  const ok7 = p7.width > 100 && p7.width < 200 && p7.height > 100 && p7.height < 200;
+  check('precision 7 is 100-200 m on a side',
+    '100-200 m', `${p7.width.toFixed(0)}x${p7.height.toFixed(0)}`, ok7);
+
+  const p6 = cellSizeMetres(encodeGeohash(43.26, -79.87, PRECISION.display));
+  const ok6 = p6.width > 600 && p6.width < 1600 && p6.height > 400 && p6.height < 900;
+  check('display precision is 0.6-1.6 km wide',
+    '0.6-1.6 km', `${(p6.width / 1000).toFixed(2)}x${(p6.height / 1000).toFixed(2)} km`, ok6);
+
+  // Two houses 2 km apart must not land in the same display cell, or the map
+  // would claim a sighting was near someone it was not.
+  const far = encodeGeohash(43.28, -79.87, PRECISION.display);
+  const near = encodeGeohash(43.26, -79.87, PRECISION.display);
+  check('points 2 km apart differ at display precision', true, far !== near, far !== near);
+
+  // A single house address and the same house plus 20 m must collapse together
+  // at display precision, which is what hides which house reported.
+  const a = encodeGeohash(43.2600, -79.8700, PRECISION.display);
+  const c = encodeGeohash(43.2602, -79.8702, PRECISION.display);
+  check('neighbouring houses collapse to one display cell', true, a === c, a === c);
+
+  const regions = regionsForBounds({ minLat: 43.2, maxLat: 43.3, minLon: -79.95, maxLon: -79.8 });
+  const allRegion = regions.every((r) => r.length === PRECISION.region);
+  check('a viewport maps to region cells', `>=1, all length ${PRECISION.region}`,
+    `${regions.length} cells`, regions.length >= 1 && allRegion);
+
+  let threw = false;
+  try { encodeGeohash(95, 0, 7); } catch { threw = true; }
+  check('an out-of-range latitude is rejected', true, threw, threw);
 }
 
 console.log(failures === 0 ? '\nAll checks passed.\n' : `\n${failures} check(s) failed.\n`);

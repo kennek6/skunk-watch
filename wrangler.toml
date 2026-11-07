@@ -1,0 +1,18 @@
+name = "skunk-watch-api"
+main = "worker.js"
+compatibility_date = "2026-11-01"
+
+# The page itself is on GitHub Pages; this Worker is only the API.
+workers_dev = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "skunk-watch"
+# database_id is filled in by `wrangler d1 create skunk-watch`.
+database_id = "PLACEHOLDER"
+
+# Hourly sweep: drop reports past 48 h, prune the recent tier past 30 days,
+# clear expired roadkill suppression. The aggregate counts are written at
+# insert time, so this only deletes.
+[triggers]
+crons = ["17 * * * *"]
