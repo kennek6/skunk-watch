@@ -9,6 +9,7 @@
 import { assess, timeline, peakWindow } from './risk.js';
 import { geohashBounds, geohashCentre, metresBetween, regionsForBounds, PRECISION } from './geo.js';
 import { API_BASE } from './config.js';
+import { WHEN_OPTIONS, agoHoursFor, describeAge } from './when.js';
 
 const $ = (id) => document.getElementById(id);
 const els = {
@@ -312,7 +313,7 @@ function drawCells() {
     const rect = L.rectangle(bounds, style);
     const lines = [];
     if (info.live.length) {
-      lines.push(...info.live.slice(0, 4).map((r) => `${TYPE_LABELS[r.type]}, around ${r.observed_hour.slice(11)}:00`));
+      lines.push(...info.live.slice(0, 4).map((r) => `${TYPE_LABELS[r.type]}, ${describeAge(r.observed_hour)}`));
       if (info.live.some((r) => r.under_structure)) lines.push('Went under a deck, shed or porch');
     }
     if (info.recent) lines.push(`${info.recent} report${info.recent === 1 ? '' : 's'} in the last ${RECENT_DAYS_SHOWN} days`);
@@ -363,6 +364,7 @@ function renderNearby(cells) {
 
 let reportKind = null;
 let structureChecked = false;
+let whenId = 'now';
 
 function setPending(lat, lon) {
   pendingLatLon = { lat, lon };
@@ -383,6 +385,7 @@ function resetReport() {
   reportKind = null;
   selectedType = null;
   structureChecked = false;
+  whenId = 'now';
   els.reportStep1.hidden = false;
   els.reportStep2.hidden = true;
   els.reportDetail.replaceChildren();
@@ -401,6 +404,7 @@ function chooseKind(kind) {
   // map press rather than hunting through a list of four options.
   selectedType = kind === 'saw' ? 'saw_live' : 'smelled_fresh';
   structureChecked = false;
+  whenId = 'now';
   els.reportStep1.hidden = true;
   els.reportStep2.hidden = false;
   els.reportWhere.textContent = kind === 'saw'
@@ -413,6 +417,20 @@ function chooseKind(kind) {
 function pressed(button, isPressed) {
   if (isPressed) button.setAttribute('aria-pressed', 'true');
   else button.removeAttribute('aria-pressed');
+}
+
+function buildWhenRow() {
+  const wrap = document.createElement('div');
+  wrap.className = 'whenrow';
+  for (const o of WHEN_OPTIONS) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = o.label;
+    pressed(b, whenId === o.id);
+    b.addEventListener('click', () => { whenId = o.id; buildDetail(); });
+    wrap.append(b);
+  }
+  return wrap;
 }
 
 function buildDetail() {
@@ -458,6 +476,11 @@ function buildDetail() {
     parts.push(pair);
   }
 
+  const when = document.createElement('p');
+  when.className = 'fieldlabel';
+  when.textContent = 'When';
+  parts.push(when, buildWhenRow());
+
   els.reportDetail.replaceChildren(...parts);
 }
 
@@ -473,6 +496,7 @@ async function sendReport() {
         lon: pendingLatLon.lon,
         type: selectedType,
         underStructure: selectedType === 'saw_live' && structureChecked,
+        agoHours: agoHoursFor(whenId),
         deviceKey: deviceKey(),
       }),
     });

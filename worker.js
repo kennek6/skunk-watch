@@ -32,6 +32,10 @@ const ROADKILL_SUPPRESS_SECONDS = 7 * 86400;
 const MAX_REPORTS_PER_HOUR = 10;
 const MAX_PER_CELL_PER_HOUR = 3;
 
+// How far back a report may be dated. Older than a week is baseline material,
+// not something anyone needs warning about.
+const MAX_AGO_HOURS = 168;
+
 // Skunks are a New World family. Same bounding box as the model uses.
 const NORTH_AMERICA = { minLat: 14, maxLat: 72, minLon: -170, maxLon: -52 };
 
@@ -92,7 +96,7 @@ async function handleReport(request, env, origin) {
     return fail('Body must be JSON.', 400, origin);
   }
 
-  const { lat, lon, type, underStructure = false, deviceKey } = body ?? {};
+  const { lat, lon, type, underStructure = false, deviceKey, agoHours = 0 } = body ?? {};
 
   if (!TYPES.has(type)) {
     return fail(`type must be one of: ${[...TYPES].join(', ')}`, 400, origin);
@@ -110,6 +114,9 @@ async function handleReport(request, env, origin) {
   if (typeof underStructure !== 'boolean') {
     return fail('underStructure must be true or false.', 400, origin);
   }
+  if (!Number.isInteger(agoHours) || agoHours < 0 || agoHours > MAX_AGO_HOURS) {
+    return fail(`agoHours must be a whole number between 0 and ${MAX_AGO_HOURS}.`, 400, origin);
+  }
 
   // Snap first. From here on the raw coordinate is out of scope and is never
   // written, logged, or returned.
@@ -120,6 +127,12 @@ async function handleReport(request, env, origin) {
   const now = new Date();
   const createdAt = Math.floor(now.valueOf() / 1000);
   const sinceHour = createdAt - 3600;
+
+  // When it happened, which is not when it was reported. Everything that
+  // describes the sighting is bucketed from this; only the rate limit and the
+  // deletion clock use the arrival time.
+  const observedAt = createdAt - agoHours * 3600;
+  const observed = new Date(observedAt * 1000);
 
   const [perDevice, perCell] = await Promise.all([
     env.DB.prepare('SELECT COUNT(*) AS n FROM reports WHERE device_key = ? AND created_at > ?')
@@ -139,9 +152,11 @@ async function handleReport(request, env, origin) {
   const statements = [
     env.DB.prepare(`
       INSERT INTO reports
-        (cell, display_cell, region, type, species, under_structure, observed_hour, device_key, created_at)
-      VALUES (?, ?, ?, ?, 'skunk', ?, ?, ?, ?)
-    `).bind(cell, displayCell, region, type, underStructure ? 1 : 0, hourBucket(now), deviceKey, createdAt),
+        (cell, display_cell, region, type, species, under_structure,
+         observed_hour, observed_at, device_key, created_at)
+      VALUES (?, ?, ?, ?, 'skunk', ?, ?, ?, ?, ?)
+    `).bind(cell, displayCell, region, type, underStructure ? 1 : 0,
+      hourBucket(observed), observedAt, deviceKey, createdAt),
 
     // Aggregates are incremented on the way in rather than during the sweep.
     // If the cron never fires, the counts are still right; a sweep-time
@@ -149,24 +164,24 @@ async function handleReport(request, env, origin) {
     env.DB.prepare(`
       INSERT INTO recent (display_cell, region, day, type, n) VALUES (?, ?, ?, ?, 1)
       ON CONFLICT (display_cell, day, type) DO UPDATE SET n = n + 1
-    `).bind(displayCell, region, dayBucket(now), type),
+    `).bind(displayCell, region, dayBucket(observed), type),
 
     env.DB.prepare(`
       INSERT INTO baseline (display_cell, region, week, n) VALUES (?, ?, ?, 1)
       ON CONFLICT (display_cell, week) DO UPDATE SET n = n + 1
-    `).bind(displayCell, region, isoWeekBucket(now)),
+    `).bind(displayCell, region, isoWeekBucket(observed)),
   ];
 
   if (type === 'found_roadkill') {
     statements.push(env.DB.prepare(`
       INSERT INTO roadkill (display_cell, region, until) VALUES (?, ?, ?)
       ON CONFLICT (display_cell) DO UPDATE SET until = MAX(until, excluded.until)
-    `).bind(displayCell, region, createdAt + ROADKILL_SUPPRESS_SECONDS));
+    `).bind(displayCell, region, observedAt + ROADKILL_SUPPRESS_SECONDS));
   }
 
   await env.DB.batch(statements);
 
-  return json({ ok: true, cell: displayCell, region, hour: hourBucket(now) }, 201, origin);
+  return json({ ok: true, cell: displayCell, region, hour: hourBucket(observed) }, 201, origin);
 }
 
 // ---------------------------------------------------------------------------
@@ -192,9 +207,9 @@ async function handleRegion(region, env, origin) {
       SELECT r.display_cell, r.type, r.observed_hour, r.under_structure
         FROM reports r
         LEFT JOIN roadkill k ON k.display_cell = r.display_cell AND k.until > ?
-       WHERE r.region = ? AND r.created_at > ?
+       WHERE r.region = ? AND r.observed_at > ?
          AND NOT (r.type IN ('smelled_fresh', 'smelled_faint') AND k.display_cell IS NOT NULL)
-       ORDER BY r.observed_hour DESC
+       ORDER BY r.observed_at DESC
        LIMIT 500
     `).bind(now, region, liveSince).all(),
 

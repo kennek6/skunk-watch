@@ -17,9 +17,11 @@ CREATE TABLE IF NOT EXISTS reports (
   species         TEXT    NOT NULL DEFAULT 'skunk',
   under_structure INTEGER NOT NULL DEFAULT 0 CHECK (under_structure IN (0, 1)),
   observed_hour   TEXT    NOT NULL,  -- 'YYYY-MM-DDTHH' in UTC, never finer
+  observed_at     INTEGER NOT NULL,  -- when it was SEEN, which drives the live tier
   device_key      TEXT    NOT NULL,  -- random per install, for rate limits only
-  created_at      INTEGER NOT NULL   -- unix seconds, drives the sweep
+  created_at      INTEGER NOT NULL   -- unix seconds, drives the deletion sweep only
 );
+CREATE INDEX IF NOT EXISTS idx_reports_region_observed ON reports (region, observed_at);
 CREATE INDEX IF NOT EXISTS idx_reports_region_created ON reports (region, created_at);
 CREATE INDEX IF NOT EXISTS idx_reports_device_created ON reports (device_key, created_at);
 CREATE INDEX IF NOT EXISTS idx_reports_created ON reports (created_at);

@@ -12,6 +12,7 @@
 
 import { assess, timeline, peakWindow } from './risk.js';
 import { encodeGeohash, geohashBounds, cellSizeMetres, regionsForBounds, PRECISION } from './geo.js';
+import { agoHoursFor, describeAge, WHEN_OPTIONS, MAX_AGO_HOURS } from './when.js';
 
 const HAMILTON = { lat: 43.26, lon: -79.87 };
 const FAIRBANKS = { lat: 64.84, lon: -147.72 };
@@ -284,6 +285,66 @@ console.log('\nGrid snapping\n');
   let threw = false;
   try { encodeGeohash(95, 0, 7); } catch { threw = true; }
   check('an out-of-range latitude is rejected', true, threw, threw);
+}
+
+
+// ---------------------------------------------------------------------------
+// Backdating. A report about last night must not read as happening now, and
+// must count toward the right day. These are local-time cases, so the tests
+// build Date objects in the host timezone on purpose.
+// ---------------------------------------------------------------------------
+
+console.log('\nWhen a sighting happened\n');
+{
+  const check = (label, expected, got, ok) => {
+    if (!ok) failures++;
+    console.log(row(label, String(expected), String(got), ok ? 'PASS' : 'FAIL'));
+  };
+
+  const at = (y, m, d, h, min = 0) => new Date(y, m - 1, d, h, min, 0, 0);
+
+  check('"just now" is zero hours', 0, agoHoursFor('now', at(2026, 11, 7, 18, 7)),
+    agoHoursFor('now', at(2026, 11, 7, 18, 7)) === 0);
+
+  // Reporting on Saturday evening, last night is Friday 22:00.
+  const evening = agoHoursFor('lastnight', at(2026, 11, 7, 18, 7));
+  check('reporting at 18:07, "last night" is ~20 h back', 20, evening, evening === 20);
+
+  // Reporting at 02:00, last night is four hours earlier, not 28.
+  const smallHours = agoHoursFor('lastnight', at(2026, 11, 8, 2, 0));
+  check('reporting at 02:00, "last night" is 4 h back', 4, smallHours, smallHours === 4);
+
+  // "Earlier today" must never reach back past local midnight.
+  for (const [hour, expected] of [[18, 6], [8, 6], [3, 3], [1, 1], [0, 0]]) {
+    const got = agoHoursFor('today', at(2026, 11, 7, hour, 30));
+    check(`"earlier today" at ${String(hour).padStart(2, '0')}:30 stays inside today`,
+      expected, got, got === expected);
+  }
+
+  const crossesMidnight = [0, 1, 3, 8, 18].some((h) =>
+    agoHoursFor('today', at(2026, 11, 7, h, 30)) > h + 1);
+  check('"earlier today" never crosses midnight', false, crossesMidnight, crossesMidnight === false);
+
+  for (const o of WHEN_OPTIONS) {
+    const v = agoHoursFor(o.id, at(2026, 11, 7, 18, 7));
+    const ok = Number.isInteger(v) && v >= 0 && v <= MAX_AGO_HOURS;
+    check(`"${o.label}" is a whole number of hours within a week`, `0-${MAX_AGO_HOURS}`, v, ok);
+  }
+
+  let threw = false;
+  try { agoHoursFor('whenever'); } catch { threw = true; }
+  check('an unknown option is rejected', true, threw, threw);
+
+  const now = new Date('2026-11-07T23:30:00Z');
+  for (const [stamp, expected] of [
+    ['2026-11-07T23', 'within the hour'],
+    ['2026-11-07T20', '3 h ago'],
+    ['2026-11-06T22', 'yesterday'],
+    ['2026-11-04T22', '3 days ago'],
+  ]) {
+    const got = describeAge(stamp, now);
+    check(`${stamp} reads as "${expected}"`, expected, got, got === expected);
+  }
 }
 
 console.log(failures === 0 ? '\nAll checks passed.\n' : `\n${failures} check(s) failed.\n`);
