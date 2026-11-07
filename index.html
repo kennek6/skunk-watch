@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Skunk Watch</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<meta name="theme-color" content="#1b1b1f">
+<style>
+  :root {
+    --bg: #faf9f7;
+    --surface: #ffffff;
+    --border: #e3e0da;
+    --text: #1b1b1f;
+    --muted: #6b6762;
+    --warn-high-bg: #fdeeee;
+    --warn-high-edge: #c6453c;
+    --warn-elev-bg: #fdf6e7;
+    --warn-elev-edge: #b07d14;
+    --accent: #2f6f4f;
+    --quiet-fill: #eceae4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #16161a;
+      --surface: #1f1f24;
+      --border: #32323a;
+      --text: #ececef;
+      --muted: #9b968f;
+      --warn-high-bg: #2e1a19;
+      --warn-high-edge: #e07a72;
+      --warn-elev-bg: #2b2317;
+      --warn-elev-edge: #d6a944;
+      --accent: #6cbf93;
+      --quiet-fill: #2a2a31;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #16161a; --surface: #1f1f24; --border: #32323a; --text: #ececef;
+    --muted: #9b968f; --warn-high-bg: #2e1a19; --warn-high-edge: #e07a72;
+    --warn-elev-bg: #2b2317; --warn-elev-edge: #d6a944; --accent: #6cbf93;
+    --quiet-fill: #2a2a31;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-text-size-adjust: 100%;
+  }
+  main { max-width: 32rem; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
+  h1 { font-size: 1.25rem; margin: 0 0 .25rem; letter-spacing: -0.01em; }
+  .tagline { color: var(--muted); font-size: .875rem; margin: 0 0 1.5rem; }
+
+  form { display: flex; gap: .5rem; margin-bottom: .5rem; }
+  input[type=text] {
+    flex: 1 1 auto; min-width: 0; padding: .6rem .7rem; font-size: 1rem;
+    color: var(--text); background: var(--surface);
+    border: 1px solid var(--border); border-radius: .5rem;
+  }
+  button {
+    padding: .6rem .8rem; font-size: .9375rem; font-family: inherit;
+    color: var(--text); background: var(--surface);
+    border: 1px solid var(--border); border-radius: .5rem; cursor: pointer;
+  }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button:disabled { opacity: .55; cursor: default; }
+  .gps { width: 100%; margin-bottom: 1.25rem; }
+
+  .choices { list-style: none; margin: 0 0 1.25rem; padding: 0; display: grid; gap: .375rem; }
+  .choices button { width: 100%; text-align: left; }
+
+  .banner {
+    border: 1px solid; border-left-width: 4px; border-radius: .5rem;
+    padding: .875rem 1rem; margin-bottom: 1.25rem;
+  }
+  .banner.high { background: var(--warn-high-bg); border-color: var(--warn-high-edge); }
+  .banner.elevated { background: var(--warn-elev-bg); border-color: var(--warn-elev-edge); }
+  .banner h2 { font-size: 1.0625rem; margin: 0; }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: .5rem; padding: .875rem 1rem; margin-bottom: 1rem;
+  }
+  .card h3 {
+    font-size: .75rem; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--muted); margin: 0 0 .5rem; font-weight: 600;
+  }
+  .card ul { margin: 0; padding-left: 1.1rem; }
+  .card li + li { margin-top: .25rem; }
+  .summary { font-size: .9375rem; margin: 0 0 .5rem; }
+  .strip {
+    display: flex; height: 2.25rem; overflow: hidden;
+    border: 1px solid var(--border); border-radius: .375rem;
+  }
+  .strip > div { flex: 1 1 0; min-width: 0; }
+  .seg-quiet { background: var(--quiet-fill); }
+  .seg-elevated { background: var(--warn-elev-edge); }
+  .seg-high { background: var(--warn-high-edge); }
+  .ticks { display: flex; margin: .25rem 0 0; color: var(--muted); font-size: .6875rem; }
+  .ticks > span { flex: 1 1 0; min-width: 0; }
+  .meta { color: var(--muted); font-size: .875rem; }
+  .meta div + div { margin-top: .125rem; }
+  .note { color: var(--muted); font-size: .8125rem; margin: 1.5rem 0 0; }
+  .error { color: var(--warn-high-edge); font-size: .9375rem; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Skunk Watch</h1>
+  <p class="tagline">Check before you let the dog out.</p>
+
+  <form id="search">
+    <input type="text" id="place" placeholder="Town or city" autocomplete="off"
+           aria-label="Town or city" enterkeyhint="search">
+    <button type="submit" class="primary">Check</button>
+  </form>
+  <button type="button" id="gps" class="gps">Use my location</button>
+
+  <ul class="choices" id="choices" hidden></ul>
+  <p class="error" id="error" hidden></p>
+
+  <section id="result" hidden>
+    <div class="banner" id="banner" hidden><h2 id="headline"></h2></div>
+    <div class="card">
+      <h3>Next 18 hours</h3>
+      <p class="summary" id="summary"></p>
+      <div class="strip" id="strip" role="img"></div>
+      <p class="ticks" id="ticks"></p>
+    </div>
+    <div class="card">
+      <h3>Conditions</h3>
+      <ul id="factors"></ul>
+    </div>
+    <div class="card meta" id="meta"></div>
+  </section>
+
+  <p class="note">
+    This page shows a warning only when conditions favour skunk activity. Silence
+    means no warning was triggered, not that nothing is nearby.
+  </p>
+</main>
+
+<script type="module">
+import { assess, timeline, peakWindow } from './risk.js';
+
+const $ = (id) => document.getElementById(id);
+const els = {
+  form: $('search'), place: $('place'), gps: $('gps'), choices: $('choices'),
+  error: $('error'), result: $('result'), banner: $('banner'),
+  headline: $('headline'), factors: $('factors'), meta: $('meta'),
+  summary: $('summary'), strip: $('strip'), ticks: $('ticks'),
+};
+
+const HEADLINES = {
+  high: 'Skunks are likely active now',
+  elevated: 'Skunks may be active now',
+};
+
+// Coordinates are rounded before any request leaves the device. Two decimal
+// places is roughly 1 km, which is plenty for weather and keeps the weather
+// provider from being handed a street address.
+const coarse = (n) => Math.round(n * 100) / 100;
+
+const pad = (n) => String(n).padStart(2, '0');
+
+// Build an ISO timestamp carrying an explicit UTC offset, so the model's notion
+// of "today" matches the location rather than this device's timezone.
+function isoInOffset(date, offsetSeconds) {
+  const shifted = new Date(date.valueOf() + offsetSeconds * 1000);
+  const mins = Math.abs(Math.round(offsetSeconds / 60));
+  const sign = offsetSeconds < 0 ? '-' : '+';
+  return `${shifted.getUTCFullYear()}-${pad(shifted.getUTCMonth() + 1)}-${pad(shifted.getUTCDate())}`
+    + `T${pad(shifted.getUTCHours())}:${pad(shifted.getUTCMinutes())}:${pad(shifted.getUTCSeconds())}`
+    + `${sign}${pad(Math.floor(mins / 60))}:${pad(mins % 60)}`;
+}
+
+const timeOf = (iso) => (iso ? iso.slice(11, 16) : 'unknown');
+
+function fail(message) {
+  els.error.textContent = message;
+  els.error.hidden = false;
+  els.result.hidden = true;
+}
+
+function clearMessages() {
+  els.error.hidden = true;
+  els.choices.hidden = true;
+  els.choices.replaceChildren();
+}
+
+async function fetchJSON(url, what) {
+  let res;
+  try {
+    res = await fetch(url);
+  } catch {
+    throw new Error(`Could not reach the ${what} service. Check your connection.`);
+  }
+  if (!res.ok) throw new Error(`The ${what} service returned ${res.status}.`);
+  return res.json();
+}
+
+async function geocode(name) {
+  const url = 'https://geocoding-api.open-meteo.com/v1/search'
+    + `?name=${encodeURIComponent(name)}&count=5&language=en&format=json`;
+  const data = await fetchJSON(url, 'place lookup');
+  return data.results ?? [];
+}
+
+async function weather(lat, lon) {
+  const url = 'https://api.open-meteo.com/v1/forecast'
+    + `?latitude=${coarse(lat)}&longitude=${coarse(lon)}`
+    + '&current=temperature_2m&hourly=temperature_2m,precipitation'
+    + '&past_hours=24&forecast_hours=24&timezone=auto';
+  const data = await fetchJSON(url, 'weather');
+  const tempC = data.current?.temperature_2m;
+  if (!Number.isFinite(tempC)) throw new Error('The weather service returned no temperature.');
+
+  // With timezone=auto, Open-Meteo returns local stamps like "2026-11-07T13:00".
+  const times = data.hourly?.time ?? [];
+  const temps = data.hourly?.temperature_2m ?? [];
+  const rain = data.hourly?.precipitation ?? [];
+  const tempByHour = new Map(times.map((t, i) => [t.slice(0, 13), temps[i]]));
+
+  // Rain over the trailing 24 h only. "Now" sits at the boundary between the
+  // past_hours and forecast_hours halves of the series.
+  const nowHour = (data.current?.time ?? '').slice(0, 13);
+  const nowIdx = times.findIndex((t) => t.slice(0, 13) === nowHour);
+  const from = Math.max(0, (nowIdx < 0 ? times.length : nowIdx) - 24);
+  const precipMm24h = rain.slice(from, from + 24).reduce((a, b) => a + (b ?? 0), 0);
+
+  return { tempC, precipMm24h, offsetSeconds: data.utc_offset_seconds ?? 0, tempByHour };
+}
+
+function render(label, lat, lon, wx) {
+  const timestampISO = isoInOffset(new Date(), wx.offsetSeconds);
+  const r = assess({ lat, lon, timestampISO, tempC: wx.tempC, precipMm24h: wx.precipMm24h });
+
+  els.banner.hidden = r.level === 'quiet';
+  els.banner.className = `banner ${r.level}`;
+  els.headline.textContent = HEADLINES[r.level] ?? '';
+
+  els.factors.replaceChildren(
+    ...r.factors.map((f) => Object.assign(document.createElement('li'), { textContent: f }))
+  );
+
+  renderStrip(lat, lon, wx, timestampISO);
+
+  els.meta.replaceChildren(
+    ...[
+      label,
+      `${Math.round(wx.tempC)}C, ${wx.precipMm24h.toFixed(1)} mm rain in the last 24 h`,
+      `Sunset ${timeOf(r.sunsetISO)}, sunrise ${timeOf(r.sunriseISO)}`,
+      `Checked ${timestampISO.slice(11, 16)} local`,
+    ].map((t) => Object.assign(document.createElement('div'), { textContent: t }))
+  );
+
+  els.result.hidden = false;
+}
+
+const SEG_MINUTES = 15;
+const WINDOW_HOURS = 18;
+const TICK_HOURS = 3;
+
+function summarise(segments, peak) {
+  if (!peak) return `No elevated period flagged in the next ${WINDOW_HOURS} hours.`;
+  const word = peak.level === 'high' ? 'Highest' : 'Most active';
+  if (segments[0]?.level === peak.level) return `${word} now, easing after ${timeOf(peak.endISO)}.`;
+  return `${word} from ${timeOf(peak.startISO)}.`;
+}
+
+// A strip of the hours ahead, so checking at noon shows when the evening rise
+// starts instead of needing the page reopened before every trip outside.
+function renderStrip(lat, lon, wx, startISO) {
+  const segments = timeline({
+    lat, lon, startISO, hours: WINDOW_HOURS, stepMinutes: SEG_MINUTES,
+    temperatureAt: (iso) => wx.tempByHour.get(iso.slice(0, 13)) ?? NaN,
+    precipMm24h: wx.precipMm24h,
+  });
+
+  const text = summarise(segments, peakWindow(segments));
+  els.summary.textContent = text;
+  els.strip.setAttribute('aria-label', text);
+
+  els.strip.replaceChildren(...segments.map((s) => {
+    const d = document.createElement('div');
+    d.className = `seg-${s.level}`;
+    d.title = `${timeOf(s.timestampISO)} ${s.level}`;
+    return d;
+  }));
+
+  const perTick = (TICK_HOURS * 60) / SEG_MINUTES;
+  els.ticks.replaceChildren(...segments
+    .filter((_, i) => i % perTick === 0)
+    .map((s, i) => Object.assign(document.createElement('span'), {
+      textContent: i === 0 ? 'now' : timeOf(s.timestampISO),
+    })));
+}
+
+async function show(label, lat, lon) {
+  clearMessages();
+  try {
+    render(label, lat, lon, await weather(lat, lon));
+    try { localStorage.setItem('skunkwatch:last', JSON.stringify({ label, lat, lon })); } catch {}
+  } catch (e) {
+    fail(e.message);
+  }
+}
+
+function offerChoices(results) {
+  els.choices.replaceChildren(...results.map((r) => {
+    const label = [r.name, r.admin1, r.country_code].filter(Boolean).join(', ');
+    const li = document.createElement('li');
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = label;
+    btn.addEventListener('click', () => show(label, r.latitude, r.longitude));
+    li.append(btn);
+    return li;
+  }));
+  els.choices.hidden = false;
+}
+
+els.form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const name = els.place.value.trim();
+  if (!name) return;
+  clearMessages();
+  try {
+    const results = await geocode(name);
+    if (results.length === 0) fail(`No place found matching "${name}".`);
+    else if (results.length === 1) {
+      const r = results[0];
+      show([r.name, r.admin1, r.country_code].filter(Boolean).join(', '), r.latitude, r.longitude);
+    } else offerChoices(results);
+  } catch (err) {
+    fail(err.message);
+  }
+});
+
+// Geolocation is requested only on this button press, never on load.
+els.gps.addEventListener('click', () => {
+  if (!navigator.geolocation) return fail('This browser does not offer location access.');
+  clearMessages();
+  els.gps.disabled = true;
+  els.gps.textContent = 'Locating...';
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      els.gps.disabled = false;
+      els.gps.textContent = 'Use my location';
+      show('Your location', pos.coords.latitude, pos.coords.longitude);
+    },
+    (err) => {
+      els.gps.disabled = false;
+      els.gps.textContent = 'Use my location';
+      fail(err.code === err.PERMISSION_DENIED
+        ? 'Location permission was declined. Type a town name instead.'
+        : 'Could not get a location fix. Type a town name instead.');
+    },
+    { timeout: 10000, maximumAge: 300000 }
+  );
+});
+
+// Reopen on the last place checked, so the common case is a single glance.
+try {
+  const last = JSON.parse(localStorage.getItem('skunkwatch:last') ?? 'null');
+  if (last && Number.isFinite(last.lat)) {
+    els.place.value = last.label === 'Your location' ? '' : last.label;
+    show(last.label, last.lat, last.lon);
+  }
+} catch {}
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+</script>
+</body>
+</html>
