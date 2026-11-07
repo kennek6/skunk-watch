@@ -111,23 +111,39 @@
   .ticks > span { flex: 1 1 0; min-width: 0; }
 
   #map {
-    height: 20rem; border: 1px solid var(--border); border-radius: .5rem;
+    height: 18rem; border: 1px solid var(--border); border-radius: .5rem;
     margin-bottom: .5rem; background: var(--quiet-fill);
   }
-  .legend {
-    display: flex; flex-wrap: wrap; gap: .75rem;
-    font-size: .75rem; color: var(--muted); margin: 0 0 .5rem;
+  /* Keep the map quiet: no Leaflet flag, small faint attribution, plain zoom. */
+  .leaflet-container { background: var(--quiet-fill); font: inherit; }
+  .leaflet-control-attribution {
+    background: transparent !important; color: var(--muted);
+    font-size: .625rem; opacity: .7;
   }
-  .legend span { display: inline-flex; align-items: center; gap: .3rem; }
-  .legend i { width: .75rem; height: .75rem; border-radius: 2px; display: inline-block; }
+  .leaflet-control-attribution a { color: var(--muted); }
+  .leaflet-bar { border: 1px solid var(--border); box-shadow: none; }
+  .leaflet-popup-content { font: inherit; font-size: .875rem; margin: .625rem .75rem; }
 
-  .types { display: grid; grid-template-columns: 1fr 1fr; gap: .375rem; margin: .5rem 0 .75rem; }
-  .types button { text-align: left; font-size: .875rem; padding: .5rem .6rem; }
+  /* Two big choices to start a report: saw it, or smelled it. */
+  .choice2 { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; }
+  .choice2 button {
+    display: flex; flex-direction: column; align-items: center; gap: .375rem;
+    padding: 1rem .5rem; font-size: .9375rem;
+  }
+  .choice2 svg { width: 1.75rem; height: 1.75rem; }
+
   .row { display: flex; gap: .5rem; }
   .row > button { flex: 1 1 0; }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: .375rem; margin: 0 0 .75rem; }
+  .pair button { font-size: .875rem; }
   label.check {
     display: flex; align-items: center; gap: .5rem;
-    font-size: .875rem; margin: 0 0 .75rem;
+    font-size: .875rem; margin: 0 0 .5rem;
+  }
+  button.subtle {
+    background: none; border: none; padding: .25rem 0; margin: 0 0 .75rem;
+    color: var(--muted); font-size: .8125rem; text-decoration: underline;
+    text-underline-offset: 2px; border-radius: 0;
   }
 
   .meta { color: var(--muted); font-size: .875rem; }
@@ -139,7 +155,7 @@
   [hidden] { display: none !important; }
 
   @media (max-width: 24rem) {
-    .types { grid-template-columns: 1fr; }
+    .pair { grid-template-columns: 1fr; }
   }
 </style>
 </head>
@@ -173,15 +189,9 @@
     <div class="card meta" id="meta"></div>
   </section>
 
-  <h2 class="section">What neighbours have reported</h2>
+  <h2 class="section">Nearby reports</h2>
   <p class="summary" id="nearby" hidden></p>
   <div id="map"></div>
-  <p class="legend">
-    <span><i style="background:#c6453c"></i>seen</span>
-    <span><i style="background:#d08324"></i>smelled</span>
-    <span><i style="background:#6b7f8c"></i>roadkill</span>
-    <span><i style="background:transparent;border:1px dashed #9b968f"></i>older activity</span>
-  </p>
   <p class="note" id="map-note"></p>
 
   <button type="button" id="report-open" class="primary wide" style="margin-top:1rem">
@@ -189,18 +199,38 @@
   </button>
 
   <section class="card" id="report-panel" hidden style="margin-top:1rem">
-    <h3>Report</h3>
-    <p class="summary" id="report-where">Tap the map where you saw or smelled it.</p>
-    <button type="button" id="report-gps" class="wide">Use my location instead</button>
-    <div class="types" id="report-types"></div>
-    <label class="check" id="report-structure-row" hidden>
-      <input type="checkbox" id="report-structure">
-      It went under a deck, shed or porch
-    </label>
-    <div class="row">
-      <button type="button" id="report-send" class="primary">Send</button>
-      <button type="button" id="report-cancel">Cancel</button>
+    <div class="choice2" id="report-step1">
+      <button type="button" id="report-saw">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/>
+          <circle cx="12" cy="12" r="2.8"/>
+        </svg>
+        <span>Saw one</span>
+      </button>
+      <button type="button" id="report-smelled">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+             stroke-linecap="round" aria-hidden="true">
+          <path d="M4 18c2.5 0 2.5-2.6 5-2.6s2.5 2.6 5 2.6 2.5-2.6 5-2.6"/>
+          <path d="M4 12.5c2.5 0 2.5-2.6 5-2.6s2.5 2.6 5 2.6 2.5-2.6 5-2.6"/>
+          <path d="M4 7c2.5 0 2.5-2.6 5-2.6S11.5 7 14 7s2.5-2.6 5-2.6"/>
+        </svg>
+        <span>Smelled it</span>
+      </button>
     </div>
+
+    <div id="report-step2" hidden>
+      <p class="summary" id="report-where">Tap the map where it was.</p>
+      <button type="button" id="report-gps" class="wide" style="margin-bottom:.75rem">
+        Use my location instead
+      </button>
+      <div id="report-detail"></div>
+      <div class="row">
+        <button type="button" id="report-send" class="primary">Send</button>
+        <button type="button" id="report-back">Back</button>
+      </div>
+    </div>
+
     <p class="status" id="report-status"></p>
   </section>
 

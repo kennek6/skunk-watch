@@ -18,11 +18,11 @@ const els = {
   summary: $('summary'), strip: $('strip'), ticks: $('ticks'),
   nearby: $('nearby'), mapNote: $('map-note'),
   reportOpen: $('report-open'), reportPanel: $('report-panel'),
+  reportStep1: $('report-step1'), reportStep2: $('report-step2'),
+  reportSaw: $('report-saw'), reportSmelled: $('report-smelled'),
   reportWhere: $('report-where'), reportGps: $('report-gps'),
-  reportTypes: $('report-types'), reportStructure: $('report-structure'),
-  reportStructureRow: $('report-structure-row'),
-  reportSend: $('report-send'), reportCancel: $('report-cancel'),
-  reportStatus: $('report-status'),
+  reportDetail: $('report-detail'), reportSend: $('report-send'),
+  reportBack: $('report-back'), reportStatus: $('report-status'),
 };
 
 const HEADLINES = {
@@ -37,12 +37,8 @@ const TYPE_LABELS = {
   found_roadkill: 'Found one dead on the road',
 };
 
-const TYPE_COLOURS = {
-  saw_live: '#c6453c',
-  smelled_fresh: '#d08324',
-  smelled_faint: '#c9a227',
-  found_roadkill: '#6b7f8c',
-};
+const LIVE_COLOUR = '#c6453c';
+const OLDER_COLOUR = '#9b968f';
 
 const SEG_MINUTES = 15;
 const WINDOW_HOURS = 18;
@@ -225,19 +221,26 @@ function initMap() {
   if (map || typeof L === 'undefined') return;
 
   map = L.map('map', { zoomControl: true, maxZoom: 17 }).setView([43.26, -79.87], 13);
+  map.attributionControl.setPrefix('');
 
-  // CEILING: OpenStreetMap's public tiles are fine at this traffic but their
-  // usage policy rules out a heavy app. Swap in MapTiler or Protomaps (~$20/mo)
-  // if daily tile loads get into the thousands.
-  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 17,
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-  }).addTo(map);
+  // A near-greyscale basemap, so the only colour on screen is the data. The
+  // dark variant is picked up when the page is in dark mode.
+  // CEILING: CARTO's free tiles suit this traffic. Switch to MapTiler or
+  // Protomaps (about $20/mo) if daily tile loads reach the thousands.
+  const darkMode = matchMedia('(prefers-color-scheme: dark)').matches;
+  L.tileLayer(
+    `https://{s}.basemaps.cartocdn.com/${darkMode ? 'dark' : 'light'}_all/{z}/{x}/{y}{r}.png`,
+    {
+      subdomains: 'abcd',
+      maxZoom: 17,
+      attribution: '&copy; OpenStreetMap, &copy; CARTO',
+    }
+  ).addTo(map);
 
   cellLayer = L.layerGroup().addTo(map);
 
   map.on('click', (e) => {
-    if (els.reportPanel.hidden) return;
+    if (els.reportStep2.hidden) return;
     setPending(e.latlng.lat, e.latlng.lng);
   });
 
@@ -304,13 +307,13 @@ function drawCells() {
     // outline means older activity. The rectangle is the cell itself, never a
     // dot at its centre, because the precision was deliberately removed.
     const style = newest
-      ? { color: TYPE_COLOURS[newest.type], weight: 1, fillOpacity: 0.35, fillColor: TYPE_COLOURS[newest.type] }
-      : { color: '#9b968f', weight: 1, dashArray: '3 3', fillOpacity: 0.06, fillColor: '#9b968f' };
+      ? { color: LIVE_COLOUR, weight: 1, fillOpacity: 0.3, fillColor: LIVE_COLOUR }
+      : { color: OLDER_COLOUR, weight: 1, dashArray: '3 3', fillOpacity: 0.05, fillColor: OLDER_COLOUR };
 
     const rect = L.rectangle(bounds, style);
     const lines = [];
     if (info.live.length) {
-      lines.push(...info.live.slice(0, 4).map((r) => `${TYPE_LABELS[r.type]}, ${r.observed_hour.slice(11)}:00`));
+      lines.push(...info.live.slice(0, 4).map((r) => `${TYPE_LABELS[r.type]}, around ${r.observed_hour.slice(11)}:00`));
       if (info.live.some((r) => r.under_structure)) lines.push('Went under a deck, shed or porch');
     }
     if (info.recent) lines.push(`${info.recent} report${info.recent === 1 ? '' : 's'} in the last ${RECENT_DAYS_SHOWN} days`);
@@ -320,8 +323,8 @@ function drawCells() {
   }
 
   els.mapNote.textContent = cells.size
-    ? `${cells.size} area${cells.size === 1 ? '' : 's'} with reports in view. Each square is about 900 m across.`
-    : 'No reports in this area yet. Each square drawn is about 900 m across.';
+    ? 'Each square is about 900 m across. Tap one for detail.'
+    : 'No reports here yet.';
 
   renderNearby(cells);
 }
@@ -350,10 +353,17 @@ function renderNearby(cells) {
 // ---------------------------------------------------------------------------
 // Reporting
 //
-// Tapping the map is the default, so a report about a skunk two streets over
-// does not require being there, and the app never learns where the reporter is.
-// "Use my location" is the shortcut, not the main path.
+// Two steps. First what happened: saw one, or smelled it. Then where, by
+// tapping the map, which covers reporting something seen from a passing car and
+// means the app never learns where the reporter is, only where the animal was.
+//
+// Roadkill is reachable from the "saw one" branch as a quiet secondary option
+// rather than a button of its own. Someone looking for it finds it; nobody
+// opening the app to check on their dog has it put in front of them.
 // ---------------------------------------------------------------------------
+
+let reportKind = null;
+let structureChecked = false;
 
 function setPending(lat, lon) {
   pendingLatLon = { lat, lon };
@@ -361,18 +371,24 @@ function setPending(lat, lon) {
   pendingMarker = L.circleMarker([lat, lon], {
     radius: 7, color: '#2f6f4f', weight: 2, fillColor: '#2f6f4f', fillOpacity: 0.5,
   }).addTo(map);
-  els.reportWhere.textContent = 'Spot chosen. Snapped to an area about 900 m across when sent.';
+  els.reportWhere.textContent = 'Spot chosen. Stored as an area about 900 m across.';
   updateSendState();
 }
 
 function clearPending() {
   if (pendingMarker) { pendingMarker.remove(); pendingMarker = null; }
   pendingLatLon = null;
+}
+
+function resetReport() {
+  reportKind = null;
   selectedType = null;
-  for (const b of els.reportTypes.querySelectorAll('button')) b.removeAttribute('aria-pressed');
-  els.reportStructure.checked = false;
-  els.reportStructureRow.hidden = true;
-  els.reportWhere.textContent = 'Tap the map where you saw or smelled it.';
+  structureChecked = false;
+  els.reportStep1.hidden = false;
+  els.reportStep2.hidden = true;
+  els.reportDetail.replaceChildren();
+  els.reportStatus.textContent = '';
+  clearPending();
   updateSendState();
 }
 
@@ -380,20 +396,70 @@ function updateSendState() {
   els.reportSend.disabled = !(pendingLatLon && selectedType);
 }
 
-function buildTypeButtons() {
-  els.reportTypes.replaceChildren(...Object.entries(TYPE_LABELS).map(([type, label]) => {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.textContent = label;
-    b.addEventListener('click', () => {
-      selectedType = type;
-      for (const other of els.reportTypes.querySelectorAll('button')) other.removeAttribute('aria-pressed');
-      b.setAttribute('aria-pressed', 'true');
-      els.reportStructureRow.hidden = type !== 'saw_live';
+function chooseKind(kind) {
+  reportKind = kind;
+  // A sensible default is already selected, so a report takes two taps and a
+  // map press rather than hunting through a list of four options.
+  selectedType = kind === 'saw' ? 'saw_live' : 'smelled_fresh';
+  structureChecked = false;
+  els.reportStep1.hidden = true;
+  els.reportStep2.hidden = false;
+  els.reportWhere.textContent = kind === 'saw'
+    ? 'Tap the map where you saw it.'
+    : 'Tap the map where you smelled it.';
+  buildDetail();
+  updateSendState();
+}
+
+function pressed(button, isPressed) {
+  if (isPressed) button.setAttribute('aria-pressed', 'true');
+  else button.removeAttribute('aria-pressed');
+}
+
+function buildDetail() {
+  const parts = [];
+
+  if (reportKind === 'saw') {
+    const dead = selectedType === 'found_roadkill';
+
+    if (!dead) {
+      const label = document.createElement('label');
+      label.className = 'check';
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.checked = structureChecked;
+      box.addEventListener('change', () => { structureChecked = box.checked; });
+      label.append(box, document.createTextNode('It went under a deck, shed or porch'));
+      parts.push(label);
+    }
+
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'subtle';
+    toggle.textContent = dead ? 'Recorded as not alive. Undo' : "It wasn't alive";
+    pressed(toggle, dead);
+    toggle.addEventListener('click', () => {
+      selectedType = dead ? 'saw_live' : 'found_roadkill';
+      if (!dead) structureChecked = false;
+      buildDetail();
       updateSendState();
     });
-    return b;
-  }));
+    parts.push(toggle);
+  } else {
+    const pair = document.createElement('div');
+    pair.className = 'pair';
+    for (const [type, text] of [['smelled_fresh', 'Strong, fresh'], ['smelled_faint', 'Faint']]) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = text;
+      pressed(b, selectedType === type);
+      b.addEventListener('click', () => { selectedType = type; buildDetail(); updateSendState(); });
+      pair.append(b);
+    }
+    parts.push(pair);
+  }
+
+  els.reportDetail.replaceChildren(...parts);
 }
 
 async function sendReport() {
@@ -407,7 +473,7 @@ async function sendReport() {
         lat: pendingLatLon.lat,
         lon: pendingLatLon.lon,
         type: selectedType,
-        underStructure: selectedType === 'saw_live' && els.reportStructure.checked,
+        underStructure: selectedType === 'saw_live' && structureChecked,
         deviceKey: deviceKey(),
       }),
     });
@@ -415,7 +481,7 @@ async function sendReport() {
     clearPending();
     regionCache.clear();
     await loadVisibleRegions();
-    setTimeout(() => { els.reportPanel.hidden = true; els.reportStatus.textContent = ''; }, 1500);
+    setTimeout(() => { els.reportPanel.hidden = true; resetReport(); }, 1500);
   } catch (e) {
     els.reportStatus.textContent = e.message;
     updateSendState();
@@ -505,15 +571,16 @@ els.reportGps.addEventListener('click', () => {
 els.reportOpen.addEventListener('click', () => {
   els.reportPanel.hidden = !els.reportPanel.hidden;
   if (!els.reportPanel.hidden) {
-    clearPending();
+    resetReport();
     els.reportPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 });
-els.reportCancel.addEventListener('click', () => { clearPending(); els.reportPanel.hidden = true; });
+els.reportSaw.addEventListener('click', () => chooseKind('saw'));
+els.reportSmelled.addEventListener('click', () => chooseKind('smelled'));
+els.reportBack.addEventListener('click', resetReport);
 els.reportSend.addEventListener('click', sendReport);
 
-buildTypeButtons();
-updateSendState();
+resetReport();
 initMap();
 
 // Reopen on the last place checked, so the common case is a single glance.

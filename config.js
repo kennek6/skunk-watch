@@ -10,4 +10,4 @@ const LOCAL = new Set(['127.0.0.1', 'localhost']);
 
 export const API_BASE = LOCAL.has(location.hostname)
   ? 'http://127.0.0.1:8788'
-  : 'https://skunk-watch-api.kennek6.workers.dev';
+  : 'https://skunk-watch-api.skunk-watch.workers.dev';

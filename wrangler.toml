@@ -9,7 +9,7 @@ workers_dev = true
 binding = "DB"
 database_name = "skunk-watch"
 # database_id is filled in by `wrangler d1 create skunk-watch`.
-database_id = "PLACEHOLDER"
+database_id = "5487c3e0-6dff-4693-9694-046b37c2b7f3"
 
 # Hourly sweep: drop reports past 48 h, prune the recent tier past 30 days,
 # clear expired roadkill suppression. The aggregate counts are written at
