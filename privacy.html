@@ -122,9 +122,23 @@
     <li><a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>
       serves the map tiles, which means it sees which map squares your browser
       requests</li>
+    <li><a href="https://www.gbif.org/">GBIF</a> supplies the faint historic
+      shading, from museum collections, naturalist observations and roadkill
+      surveys. Your browser never contacts GBIF: the server fetches a whole
+      city-sized region at a time and caches it, so no part of your position or
+      your map view reaches them</li>
     <li>Cloudflare hosts the reporting API; GitHub Pages serves this page. Both
       see ordinary web server request logs</li>
   </ul>
+
+  <h2>A caution about the historic shading</h2>
+  <p>
+    The faint shading comes from records people happened to submit over the
+    years, so it measures where naturalists spend their time as much as where
+    skunks live. Shading means skunks have been recorded there. Blank space
+    means nobody recorded one, which is a much weaker statement than their
+    being absent.
+  </p>
 
   <h2>A caution about the estimate</h2>
   <p>

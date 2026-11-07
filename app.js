@@ -40,6 +40,7 @@ const TYPE_LABELS = {
 
 const LIVE_COLOUR = '#c6453c';
 const OLDER_COLOUR = '#9b968f';
+const HISTORIC_COLOUR = '#6b7f8c';
 
 const SEG_MINUTES = 15;
 const WINDOW_HOURS = 18;
@@ -217,6 +218,7 @@ let pendingLatLon = null;
 let selectedType = null;
 let viewerLatLon = null;
 const regionCache = new Map();
+let historicRetry = false;
 
 function initMap() {
   if (map || typeof L === 'undefined') return;
@@ -256,9 +258,12 @@ async function loadVisibleRegions() {
     minLon: b.getWest(), maxLon: b.getEast(),
   }).slice(0, MAX_REGIONS_PER_LOAD);
 
+  let pending = false;
   await Promise.all(regions.map(async (region) => {
     try {
-      regionCache.set(region, await fetchJSON(`${API_BASE}/api/region/${region}`, 'reports'));
+      const data = await fetchJSON(`${API_BASE}/api/region/${region}`, 'reports');
+      regionCache.set(region, data);
+      if (data.historicPending) pending = true;
     } catch {
       // A region that will not load leaves the map as it was rather than
       // blanking it. The note below says when nothing could be fetched.
@@ -268,25 +273,34 @@ async function loadVisibleRegions() {
   drawCells();
 }
 
+const blankCell = () => ({ live: [], recent: 0, baseline: 0, historic: 0, firstYear: null, lastYear: null });
+
 function activityByCell() {
   const cells = new Map();
   const cutoff = new Date(Date.now() - RECENT_DAYS_SHOWN * 86400000).toISOString().slice(0, 10);
 
   for (const data of regionCache.values()) {
     for (const r of data.live ?? []) {
-      const c = cells.get(r.display_cell) ?? { live: [], recent: 0, baseline: 0 };
+      const c = cells.get(r.display_cell) ?? blankCell();
       c.live.push(r);
       cells.set(r.display_cell, c);
     }
     for (const r of data.recent ?? []) {
       if (r.day < cutoff) continue;
-      const c = cells.get(r.display_cell) ?? { live: [], recent: 0, baseline: 0 };
+      const c = cells.get(r.display_cell) ?? blankCell();
       c.recent += r.n;
       cells.set(r.display_cell, c);
     }
     for (const r of data.baseline ?? []) {
-      const c = cells.get(r.display_cell) ?? { live: [], recent: 0, baseline: 0 };
+      const c = cells.get(r.display_cell) ?? blankCell();
       c.baseline += r.n;
+      cells.set(r.display_cell, c);
+    }
+    for (const r of data.historic ?? []) {
+      const c = cells.get(r.display_cell) ?? blankCell();
+      c.historic += r.n;
+      c.firstYear = r.first_year;
+      c.lastYear = r.last_year;
       cells.set(r.display_cell, c);
     }
   }
@@ -306,9 +320,19 @@ function drawCells() {
     // A filled cell means something was reported in the last 48 hours. An
     // outline means older activity. The rectangle is the cell itself, never a
     // dot at its centre, because the precision was deliberately removed.
-    const style = newest
-      ? { color: LIVE_COLOUR, weight: 1, fillOpacity: 0.3, fillColor: LIVE_COLOUR }
-      : { color: OLDER_COLOUR, weight: 1, dashArray: '3 3', fillOpacity: 0.05, fillColor: OLDER_COLOUR };
+    let style;
+    if (newest) {
+      style = { color: LIVE_COLOUR, weight: 1, fillOpacity: 0.3, fillColor: LIVE_COLOUR };
+    } else if (info.recent || info.baseline) {
+      style = { color: OLDER_COLOUR, weight: 1, dashArray: '3 3', fillOpacity: 0.05, fillColor: OLDER_COLOUR };
+    } else {
+      // Historic records only. A soft wash with no outline, so decades of
+      // accumulated records read as background rather than as events.
+      style = {
+        stroke: false, fillColor: HISTORIC_COLOUR,
+        fillOpacity: Math.min(0.04 + info.historic * 0.025, 0.18),
+      };
+    }
 
     const rect = L.rectangle(bounds, style);
     const lines = [];
@@ -317,14 +341,21 @@ function drawCells() {
       if (info.live.some((r) => r.under_structure)) lines.push('Went under a deck, shed or porch');
     }
     if (info.recent) lines.push(`${info.recent} report${info.recent === 1 ? '' : 's'} in the last ${RECENT_DAYS_SHOWN} days`);
-    if (info.baseline) lines.push(`${info.baseline} all time`);
-    rect.bindPopup(lines.join('<br>') || 'No recent activity');
+    if (info.baseline) lines.push(`${info.baseline} reported here all time`);
+    if (info.historic) {
+      const span = info.firstYear && info.lastYear && info.firstYear !== info.lastYear
+        ? `${info.firstYear} to ${info.lastYear}` : `${info.lastYear ?? ''}`.trim();
+      lines.push(`${info.historic} earlier record${info.historic === 1 ? '' : 's'}`
+        + `${span ? `, ${span}` : ''} (museum and naturalist data)`);
+    }
+    rect.bindPopup(lines.join('<br>') || 'No recorded activity');
     rect.addTo(cellLayer);
   }
 
   els.mapNote.textContent = cells.size
-    ? 'Each square is about 900 m across. Tap one for detail.'
-    : 'No reports here yet.';
+    ? 'Each square is about 900 m across. Faint shading is past records, which '
+      + 'partly show where people look rather than where skunks are. Tap for detail.'
+    : 'Nothing recorded here.';
 
   renderNearby(cells);
 }
@@ -333,17 +364,22 @@ function renderNearby(cells) {
   if (!viewerLatLon) { els.nearby.hidden = true; return; }
   let live = 0;
   let recent = 0;
+  let historic = 0;
   for (const [cell, info] of cells) {
     const c = geohashCentre(cell);
     if (metresBetween(viewerLatLon.lat, viewerLatLon.lon, c.lat, c.lon) > NEARBY_METRES) continue;
     live += info.live.length;
     recent += info.recent;
+    historic += info.historic;
   }
   const km = (NEARBY_METRES / 1000).toFixed(1);
   if (live) {
     els.nearby.textContent = `${live} report${live === 1 ? '' : 's'} within ${km} km in the last 48 hours.`;
   } else if (recent) {
     els.nearby.textContent = `${recent} report${recent === 1 ? '' : 's'} within ${km} km in the last ${RECENT_DAYS_SHOWN} days.`;
+  } else if (historic) {
+    els.nearby.textContent = `No recent reports. Skunks have been recorded within ${km} km `
+      + `${historic} time${historic === 1 ? '' : 's'} in the past.`;
   } else {
     els.nearby.textContent = `Nothing reported within ${km} km recently.`;
   }

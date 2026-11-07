@@ -11,7 +11,7 @@
 //
 // See SPEC.md. The non-negotiables in it are enforced here, not just described.
 
-import { encodeGeohash, PRECISION } from './geo.js';
+import { encodeGeohash, geohashBounds, PRECISION } from './geo.js';
 
 const TYPES = new Set(['saw_live', 'smelled_fresh', 'smelled_faint', 'found_roadkill']);
 
@@ -35,6 +35,16 @@ const MAX_PER_CELL_PER_HOUR = 3;
 // How far back a report may be dated. Older than a week is baseline material,
 // not something anyone needs warning about.
 const MAX_AGO_HOURS = 168;
+
+// GBIF: existing georeferenced records, so a region is not blank before any
+// neighbour has reported. Mephitis mephitis, the striped skunk.
+const GBIF_TAXON_KEY = 5219380;
+const GBIF_PAGE = 300;          // the API's maximum page size
+const GBIF_MAX_RECORDS = 900;   // three pages is plenty for a 28 x 20 km region
+const HISTORIC_TTL_SECONDS = 90 * 86400;
+// Some records are georeferenced to a town centroid and carry tens of
+// kilometres of uncertainty. Those say nothing about a 900 m cell.
+const MAX_UNCERTAINTY_M = 2000;
 
 // Skunks are a New World family. Same bounding box as the model uses.
 const NORTH_AMERICA = { minLat: 14, maxLat: 72, minLon: -170, maxLon: -52 };
@@ -192,7 +202,7 @@ async function handleReport(request, env, origin) {
 // server never receives a position precise enough to follow anyone.
 // ---------------------------------------------------------------------------
 
-async function handleRegion(region, env, origin) {
+async function handleRegion(region, env, origin, ctx) {
   if (!/^[0-9bcdefghjkmnpqrstuvwxyz]{4}$/.test(region)) {
     return fail('Region must be a 4-character geohash.', 400, origin);
   }
@@ -201,7 +211,7 @@ async function handleRegion(region, env, origin) {
   const liveSince = now - LIVE_SECONDS;
   const recentSince = dayBucket(new Date((now - RECENT_DAYS * 86400) * 1000));
 
-  const [live, recent, baseline, roadkill] = await Promise.all([
+  const [live, recent, baseline, roadkill, historic, seeded] = await Promise.all([
     // Smell reports are held back where a carcass explains them.
     env.DB.prepare(`
       SELECT r.display_cell, r.type, r.observed_hour, r.under_structure
@@ -225,7 +235,17 @@ async function handleRegion(region, env, origin) {
 
     env.DB.prepare('SELECT display_cell, until FROM roadkill WHERE region = ? AND until > ?')
       .bind(region, now).all(),
+
+    env.DB.prepare('SELECT display_cell, n, months, first_year, last_year FROM historic WHERE region = ? LIMIT 2000')
+      .bind(region).all(),
+
+    env.DB.prepare('SELECT fetched_at FROM historic_region WHERE region = ?').bind(region).first(),
   ]);
+
+  // First sight of this region, or a stale cache: fetch in the background so
+  // the response is not held up. The next request gets the records.
+  const stale = !seeded || (now - seeded.fetched_at) > HISTORIC_TTL_SECONDS;
+  if (stale && ctx) ctx.waitUntil(seedHistoric(region, env));
 
   return json({
     region,
@@ -233,7 +253,85 @@ async function handleRegion(region, env, origin) {
     recent: recent.results ?? [],
     baseline: baseline.results ?? [],
     roadkill: roadkill.results ?? [],
+    historic: historic.results ?? [],
+    historicPending: stale,
   }, 200, origin);
+}
+
+// ---------------------------------------------------------------------------
+// Historic records from GBIF.
+//
+// Fetched by the Worker rather than the browser, so a viewer's map viewport is
+// never sent to another third party. Keyed by region, which is the same unit
+// clients already request, and cached for a quarter: these are decades of
+// accumulated records and they do not move quickly.
+// ---------------------------------------------------------------------------
+
+async function seedHistoric(region, env) {
+  const b = geohashBounds(region);
+  const base = 'https://api.gbif.org/v1/occurrence/search'
+    + `?taxonKey=${GBIF_TAXON_KEY}&hasCoordinate=true&hasGeospatialIssue=false`
+    + `&decimalLatitude=${b.minLat},${b.maxLat}`
+    + `&decimalLongitude=${b.minLon},${b.maxLon}`
+    + `&limit=${GBIF_PAGE}`;
+
+  const cells = new Map();
+  let total = 0;
+  let status = 'ok';
+
+  try {
+    for (let offset = 0; offset < GBIF_MAX_RECORDS; offset += GBIF_PAGE) {
+      const res = await fetch(`${base}&offset=${offset}`, {
+        headers: { 'user-agent': 'SkunkWatch/1.0 (https://kennek6.github.io/skunk-watch/)' },
+      });
+      if (!res.ok) { status = `gbif ${res.status}`; break; }
+      const data = await res.json();
+
+      for (const r of data.results ?? []) {
+        const { decimalLatitude: lat, decimalLongitude: lon } = r;
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+        const uncertainty = r.coordinateUncertaintyInMeters;
+        if (Number.isFinite(uncertainty) && uncertainty > MAX_UNCERTAINTY_M) continue;
+
+        const cell = encodeGeohash(lat, lon, PRECISION.display);
+        const entry = cells.get(cell)
+          ?? { n: 0, months: new Array(12).fill(0), first: null, last: null };
+        entry.n += 1;
+        if (Number.isInteger(r.month) && r.month >= 1 && r.month <= 12) entry.months[r.month - 1] += 1;
+        if (Number.isInteger(r.year)) {
+          entry.first = entry.first === null ? r.year : Math.min(entry.first, r.year);
+          entry.last = entry.last === null ? r.year : Math.max(entry.last, r.year);
+        }
+        cells.set(cell, entry);
+        total += 1;
+      }
+
+      if (data.endOfRecords) break;
+    }
+  } catch {
+    status = 'fetch failed';
+  }
+
+  const writes = [...cells].slice(0, 400).map(([cell, e]) => env.DB.prepare(`
+    INSERT INTO historic (display_cell, region, n, months, first_year, last_year)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT (display_cell) DO UPDATE SET
+      n = excluded.n, months = excluded.months,
+      first_year = excluded.first_year, last_year = excluded.last_year
+  `).bind(cell, region, e.n, JSON.stringify(e.months), e.first, e.last));
+
+  // The marker is written whatever happened, so a region that genuinely has no
+  // records, or one GBIF could not serve, is not re-fetched on every pan.
+  writes.push(env.DB.prepare(`
+    INSERT INTO historic_region (region, fetched_at, total, status) VALUES (?, ?, ?, ?)
+    ON CONFLICT (region) DO UPDATE SET
+      fetched_at = excluded.fetched_at, total = excluded.total, status = excluded.status
+  `).bind(region, Math.floor(Date.now() / 1000), total, status));
+
+  // Chunked: a dense region can produce more statements than one batch wants.
+  for (let i = 0; i < writes.length; i += 50) {
+    await env.DB.batch(writes.slice(i, i + 50));
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -255,7 +353,7 @@ async function sweep(env) {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const origin = request.headers.get('origin') ?? '';
     const url = new URL(request.url);
 
@@ -271,7 +369,7 @@ export default {
     }
     const region = url.pathname.match(/^\/api\/region\/([^/]+)$/);
     if (region && request.method === 'GET') {
-      return handleRegion(region[1].toLowerCase(), env, origin);
+      return handleRegion(region[1].toLowerCase(), env, origin, ctx);
     }
 
     return fail('Not found.', 404, origin);
